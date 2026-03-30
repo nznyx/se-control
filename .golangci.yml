@@ -1,15 +1,10 @@
-version: "2"
-
-formatters:
-  enable:
-    - gofmt         # форматирование
-    - goimports     # импорты
-
 linters:
   enable:
-    - errcheck      # проверка обработки ошибок
-    - govet         # подозрительные конструкции
-    - staticcheck   # статический анализ (включает gosimple)
-    - unused        # неиспользуемый код
-    - ineffassign   # неэффективные присваивания
-    - misspell      # опечатки в комментариях
+    - errcheck      # error handling checks
+    - govet         # suspicious constructs
+    - staticcheck   # static analysis (includes gosimple)
+    - unused        # unused code
+    - ineffassign   # ineffective assignments
+    - misspell      # typos in comments
+    - gofmt         # formatting
+    - goimports     # import ordering
