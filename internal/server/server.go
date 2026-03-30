@@ -27,12 +27,13 @@ type Server struct {
 	listener   net.Listener
 	grpcServer *grpc.Server
 
-	// mu защищает доступ к полям incoming, sendCh и cancel.
+	// mu защищает доступ к полям incoming, sendCh, cancel и incomingClosed.
 	mu sync.Mutex
 
 	// incoming — канал входящих доменных сообщений от peer-а.
 	// Пересоздаётся при каждом новом соединении.
-	incoming chan chat.Message
+	incoming       chan chat.Message
+	incomingClosed bool
 
 	// sendCh — канал исходящих доменных сообщений для отправки peer-у.
 	// Пересоздаётся при каждом новом соединении.
@@ -40,9 +41,6 @@ type Server struct {
 
 	// cancel завершает контекст активного соединения.
 	cancel context.CancelFunc
-
-	// closeOnce гарантирует однократное закрытие канала incoming.
-	closeOnce sync.Once
 }
 
 // Option — функциональная опция для конфигурации Server.
@@ -101,6 +99,10 @@ func (s *Server) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+	if s.incoming != nil && !s.incomingClosed {
+		close(s.incoming)
+		s.incomingClosed = true
+	}
 	s.mu.Unlock()
 
 	if s.grpcServer != nil {
@@ -109,14 +111,6 @@ func (s *Server) Stop() {
 		// который разблокируется только после принудительного закрытия соединения.
 		s.grpcServer.Stop()
 	}
-
-	// Если Chat() никогда не вызывался (нет активного соединения),
-	// закрываем канал incoming здесь, чтобы forwardIncoming() мог завершиться.
-	s.closeOnce.Do(func() {
-		s.mu.Lock()
-		close(s.incoming)
-		s.mu.Unlock()
-	})
 }
 
 // Close реализует интерфейс chat.Peer.
@@ -135,23 +129,29 @@ func (s *Server) Chat(stream pb.ChatService_ChatServer) error {
 	sendCh := make(chan chat.Message, bufferSize)
 
 	s.mu.Lock()
+	if s.cancel != nil {
+		s.cancel()
+	}
 	// Закрываем старый канал incoming перед заменой (если он ещё открыт).
-	// Используем отдельный closeOnce для каждого соединения.
+	if s.incoming != nil && !s.incomingClosed {
+		close(s.incoming)
+	}
 	s.incoming = incoming
+	s.incomingClosed = false
 	s.sendCh = sendCh
 	s.cancel = cancel
-	s.closeOnce = sync.Once{} // сбрасываем для нового соединения
 	s.mu.Unlock()
 
 	defer func() {
 		cancel()
 		// Закрываем канал incoming при завершении стрима,
 		// чтобы forwardIncoming() мог корректно завершиться.
-		s.closeOnce.Do(func() {
-			s.mu.Lock()
+		s.mu.Lock()
+		if s.incoming == incoming && !s.incomingClosed {
 			close(s.incoming)
-			s.mu.Unlock()
-		})
+			s.incomingClosed = true
+		}
+		s.mu.Unlock()
 	}()
 
 	var wg sync.WaitGroup

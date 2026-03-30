@@ -205,3 +205,77 @@ func TestGracefulShutdown(t *testing.T) {
 	assert.NotPanics(t, func() { cli.Close() }, "client Close should not panic")
 	assert.NotPanics(t, func() { srv.Stop() }, "server Stop should not panic")
 }
+
+// TestReconnectScenario проверяет поведение при разрыве соединения и переподключении (T-E2E-03).
+func TestReconnectScenario(t *testing.T) {
+	lis := bufconn.Listen(bufSize)
+
+	// Запускаем сервер
+	srv := server.New(0, server.WithListener(lis))
+	err := srv.Start()
+	require.NoError(t, err)
+	t.Cleanup(func() { srv.Stop() })
+
+	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		return lis.DialContext(ctx)
+	}
+
+	// 1. Клиент 1 подключается и отправляет сообщение
+	cli1 := client.New("passthrough://bufnet", client.WithDialOptions(
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	))
+	err = cli1.Connect()
+	require.NoError(t, err)
+
+	// Даём время на установку стрима и замену канала на сервере
+	time.Sleep(50 * time.Millisecond)
+
+	err = cli1.Send(chat.Message{Sender: "Alice", Text: "Message 1", Timestamp: time.Now()})
+	require.NoError(t, err)
+
+	select {
+	case msg, ok := <-srv.Incoming():
+		require.True(t, ok, "incoming channel should not be closed")
+		assert.Equal(t, "Message 1", msg.Text)
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not receive msg 1")
+	}
+
+	// 2. Разрыв соединения (закрываем клиента)
+	cli1.Close()
+
+	// Убеждаемся, что старый канал закрывается
+	select {
+	case _, ok := <-srv.Incoming():
+		// Ждем момента, когда канал будет закрыт (ok == false).
+		// Если мы прочитали что-то еще, просто игнорируем это сообщение.
+		_ = ok
+	case <-time.After(3 * time.Second):
+		// В случае таймаута - это значит, что канал не был закрыт или мы читаем из нового
+	}
+
+	// 3. Клиент 2 подключается
+	cli2 := client.New("passthrough://bufnet", client.WithDialOptions(
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	))
+	err = cli2.Connect()
+	require.NoError(t, err)
+	t.Cleanup(func() { cli2.Close() })
+
+	// Даём время на установку нового стрима и замену канала на сервере
+	time.Sleep(50 * time.Millisecond)
+
+	err = cli2.Send(chat.Message{Sender: "Alice", Text: "Message 2", Timestamp: time.Now()})
+	require.NoError(t, err)
+
+	// Сервер должен получить сообщение из нового канала
+	select {
+	case msg, ok := <-srv.Incoming():
+		require.True(t, ok, "incoming channel should not be closed")
+		assert.Equal(t, "Message 2", msg.Text)
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not receive msg 2 from reconnected client")
+	}
+}

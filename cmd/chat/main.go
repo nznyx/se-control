@@ -33,6 +33,7 @@ func main() {
 	rootCmd.Flags().IntVarP(&config.Port, "port", "p", 50051, "Порт для запуска сервера (режим сервера)")
 
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

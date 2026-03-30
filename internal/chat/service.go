@@ -3,8 +3,6 @@ package chat
 import (
 	"errors"
 	"time"
-
-	"github.com/nznyx/se-control/internal/app"
 )
 
 // Service — сервис чата, координирующий отправку и получение сообщений.
@@ -29,15 +27,6 @@ func NewService(username string) *Service {
 func (s *Service) SetPeer(peer Peer) {
 	s.peer = peer
 	go s.forwardIncoming()
-}
-
-// Start инициализирует сервис в зависимости от конфигурации.
-// Используется только если peer не был инжектирован через SetPeer.
-// Конкретные реализации server/client создаются в app.App.
-func (s *Service) Start(_ app.Config) error {
-	// Реализация перенесена в app.App (Dependency Inversion).
-	// Этот метод оставлен для обратной совместимости.
-	return nil
 }
 
 // Send отправляет текстовое сообщение от имени текущего пользователя.
@@ -73,9 +62,19 @@ func (s *Service) Stop() {
 
 // forwardIncoming читает входящие доменные сообщения от peer-а
 // и записывает их в канал messages.
-// Завершается автоматически, когда peer закрывает канал Incoming().
+// Внешний цикл позволяет переключиться на новый канал (например, когда
+// сервер заменяет начальный пустой канал при первом подключении клиента).
 func (s *Service) forwardIncoming() {
-	for msg := range s.peer.Incoming() {
-		s.messages <- msg
+	defer close(s.messages)
+	var current <-chan Message
+	for {
+		newCh := s.peer.Incoming()
+		if newCh == nil || newCh == current {
+			break
+		}
+		current = newCh
+		for msg := range current {
+			s.messages <- msg
+		}
 	}
 }
