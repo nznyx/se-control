@@ -74,7 +74,7 @@
 |----|------|-----|--------|
 | T-E2E-01 | `TestFullChatSession` — сервер и клиент обмениваются сообщениями через bufconn | Integration | ✅ Реализован |
 | T-E2E-02 | `TestGracefulShutdown` — оба пира корректно завершают работу | Integration | ✅ Реализован |
-| T-E2E-03 | `TestReconnectScenario` — поведение при разрыве соединения | Integration | 🔲 В плане |
+| T-E2E-03 | `TestReconnectScenario` — поведение при разрыве соединения | Integration | ✅ Реализован |
 
 ---
 
@@ -101,7 +101,7 @@
 - **T-CLI-04, T-CLI-05** — закрытие и ошибки подключения ✅
 - **T-UI-02, T-UI-03** — системные сообщения и чтение ввода ✅
 - **T-E2E-02** — graceful shutdown обоих пиров ✅
-- **T-E2E-03** — reconnect сценарий 🔲 В плане
+- **T-E2E-03** — reconnect сценарий ✅
 
 ---
 
