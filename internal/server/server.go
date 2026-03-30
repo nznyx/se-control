@@ -32,7 +32,7 @@ type Server struct {
 
 	// incoming — канал входящих доменных сообщений от peer-а.
 	// Пересоздаётся при каждом новом соединении.
-	incoming chan chat.Message
+	incoming       chan chat.Message
 	incomingClosed bool
 
 	// sendCh — канал исходящих доменных сообщений для отправки peer-у.
