@@ -1,0 +1,10 @@
+linters:
+  enable:
+    - errcheck      # error handling checks
+    - govet         # suspicious constructs
+    - staticcheck   # static analysis (includes gosimple)
+    - unused        # unused code
+    - ineffassign   # ineffective assignments
+    - misspell      # typos in comments
+    - gofmt         # formatting
+    - goimports     # import ordering

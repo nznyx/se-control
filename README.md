@@ -13,9 +13,10 @@
 
 ## Требования
 
-- Go 1.21+
-- protoc (Protocol Buffers compiler)
-- protoc-gen-go, protoc-gen-go-grpc
+- Go 1.24+
+- `protoc` (Protocol Buffers compiler)
+- `protoc-gen-go`, `protoc-gen-go-grpc`
+- `golangci-lint` (для линтинга)
 
 ## Установка зависимостей
 
