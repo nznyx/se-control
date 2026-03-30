@@ -1,6 +1,9 @@
 package chat
 
 import (
+	"errors"
+	"time"
+
 	"github.com/nznyx/se-control/internal/app"
 	"github.com/nznyx/se-control/internal/client"
 	"github.com/nznyx/se-control/internal/server"
@@ -35,8 +38,18 @@ func (s *Service) Start(config app.Config) error {
 }
 
 // Send отправляет текстовое сообщение от имени текущего пользователя.
-func (s *Service) Send(_ string) error {
-	// TODO: реализовать отправку сообщения через gRPC stream.
+func (s *Service) Send(text string) error {
+	if text == "" {
+		return errors.New("cannot send empty message")
+	}
+
+	_ = Message{
+		Sender:    s.username,
+		Text:      text,
+		Timestamp: time.Now(),
+	}
+
+	// TODO: реализовать интеграцию с s.server и s.client после их готовности
 	return nil
 }
 
