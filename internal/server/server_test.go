@@ -168,6 +168,9 @@ func TestServer_ChatStream(t *testing.T) {
 	stream, err := grpcClient.Chat(ctx)
 	require.NoError(t, err, "should establish chat stream")
 
+	// Даём серверу время установить stream и заменить srv.incoming.
+	time.Sleep(100 * time.Millisecond)
+
 	// Клиент отправляет сообщение.
 	sent := &pb.ChatMessage{
 		Sender:    "Alice",
@@ -205,6 +208,9 @@ func TestServer_ChatStream_Unicode(t *testing.T) {
 
 	stream, err := grpcClient.Chat(ctx)
 	require.NoError(t, err)
+
+	// Даём серверу время установить stream и заменить srv.incoming.
+	time.Sleep(100 * time.Millisecond)
 
 	unicodeTexts := []string{
 		"Привет, мир!",
