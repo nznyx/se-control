@@ -29,7 +29,7 @@ func main() {
 
 	rootCmd.Flags().StringVarP(&config.Username, "name", "n", "", "Имя пользователя (обязательно)")
 	_ = rootCmd.MarkFlagRequired("name")
-	rootCmd.Flags().StringVarP(&config.PeerAddress, "address", "a", "", "Адрес peer-а для подключения (режим клиента)")
+	rootCmd.Flags().StringVarP(&config.PeerAddress, "address", "a", "", "Адрес peer-а для подключения, включая порт (например: localhost:50051) (режим клиента)")
 	rootCmd.Flags().IntVarP(&config.Port, "port", "p", 50051, "Порт для запуска сервера (режим сервера)")
 
 	if err := rootCmd.Execute(); err != nil {
