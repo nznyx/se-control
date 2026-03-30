@@ -1,5 +1,10 @@
 # P2P gRPC Chat
 
+[![CI](https://github.com/nznyx/se-control/actions/workflows/ci.yml/badge.svg)](https://github.com/nznyx/se-control/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/badge/go-1.24-blue?logo=go)](https://golang.org/doc/go1.24)
+[![Go Report Card](https://goreportcard.com/badge/github.com/nznyx/se-control)](https://goreportcard.com/report/github.com/nznyx/se-control)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 КР за 3 модуль по SE. Выполнили: Токарев Алексей и Деружинский Дмитрий.
 
 Консольный P2P чат на Go с использованием gRPC bidirectional streaming.
