@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package chat;
+
+option go_package = "github.com/nznyx/se-control/pkg/proto/chat";
+
+// ChatMessage — единица обмена между пирами.
+message ChatMessage {
+  string sender = 1; // Имя отправителя
+  string text = 2; // Текст сообщения (Unicode)
+  int64 timestamp = 3; // Unix timestamp отправки
+}
+
+// ChatService — сервис для P2P обмена сообщениями.
+service ChatService {
+  // Chat — bidirectional streaming RPC для обмена сообщениями.
+  rpc Chat(stream ChatMessage) returns (stream ChatMessage);
+}
