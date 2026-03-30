@@ -6,9 +6,8 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"time"
 
-	pb "github.com/nznyx/se-control/pkg/proto/chat"
+	"github.com/nznyx/se-control/internal/chat"
 )
 
 // Console — консольный интерфейс для взаимодействия с пользователем.
@@ -33,12 +32,11 @@ func (c *Console) ReadInput() (string, error) {
 
 // DisplayMessage выводит отформатированное сообщение в stdout.
 // Формат: [2026-03-30 12:00:00] Alice: Hello
-func (c *Console) DisplayMessage(msg *pb.ChatMessage) {
-	t := time.Unix(msg.GetTimestamp(), 0)
+func (c *Console) DisplayMessage(msg chat.Message) {
 	fmt.Fprintf(c.writer, "[%s] %s: %s\n",
-		t.Format("2006-01-02 15:04:05"),
-		msg.GetSender(),
-		msg.GetText(),
+		msg.Timestamp.Format("2006-01-02 15:04:05"),
+		msg.Sender,
+		msg.Text,
 	)
 }
 

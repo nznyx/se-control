@@ -13,7 +13,7 @@
 
 ## Требования
 
-- Go 1.24+
+- Go 1.26+
 - `protoc` (Protocol Buffers compiler)
 - `protoc-gen-go`, `protoc-gen-go-grpc`
 - `golangci-lint` (для линтинга)
