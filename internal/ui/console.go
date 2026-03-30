@@ -26,8 +26,18 @@ func New(reader io.Reader, writer io.Writer) *Console {
 
 // ReadInput читает строку пользовательского ввода из stdin.
 func (c *Console) ReadInput() (string, error) {
-	// TODO: реализовать чтение ввода.
-	return "", nil
+	text, err := c.reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	// Убираем символы переноса строки: \n для Unix, \r\n для Windows
+	if len(text) > 0 && text[len(text)-1] == '\n' {
+		text = text[:len(text)-1]
+	}
+	if len(text) > 0 && text[len(text)-1] == '\r' {
+		text = text[:len(text)-1]
+	}
+	return text, nil
 }
 
 // DisplayMessage выводит отформатированное сообщение в stdout.
