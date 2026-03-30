@@ -33,7 +33,7 @@ func (c *Console) ReadInput() (string, error) {
 // DisplayMessage выводит отформатированное сообщение в stdout.
 // Формат: [2026-03-30 12:00:00] Alice: Hello
 func (c *Console) DisplayMessage(msg chat.Message) {
-	fmt.Fprintf(c.writer, "[%s] %s: %s\n",
+	_, _ = fmt.Fprintf(c.writer, "[%s] %s: %s\n",
 		msg.Timestamp.Format("2006-01-02 15:04:05"),
 		msg.Sender,
 		msg.Text,
@@ -42,5 +42,5 @@ func (c *Console) DisplayMessage(msg chat.Message) {
 
 // DisplaySystem выводит системное сообщение.
 func (c *Console) DisplaySystem(text string) {
-	fmt.Fprintf(c.writer, "*** %s ***\n", text)
+	_, _ = fmt.Fprintf(c.writer, "*** %s ***\n", text)
 }
