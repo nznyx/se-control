@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/nznyx/se-control/internal/chat"
 	pb "github.com/nznyx/se-control/pkg/proto/chat"
 )
 
@@ -17,7 +18,8 @@ import (
 const bufferSize = 100
 
 // Server — gRPC сервер, обрабатывающий bidirectional streaming.
-// Работает с protobuf-типами; конвертация в доменные типы выполняется в chat.Service.
+// Реализует интерфейс chat.Peer: Send(chat.Message), Incoming() <-chan chat.Message, Close().
+// Конвертация proto ↔ domain выполняется внутри пакета.
 type Server struct {
 	pb.UnimplementedChatServiceServer
 
@@ -25,17 +27,22 @@ type Server struct {
 	listener   net.Listener
 	grpcServer *grpc.Server
 
-	// incoming — канал входящих protobuf-сообщений от peer-а.
-	incoming chan *pb.ChatMessage
-	// sendCh — канал исходящих protobuf-сообщений для отправки peer-у.
-	sendCh chan *pb.ChatMessage
+	// mu защищает доступ к полям incoming, sendCh и cancel.
+	mu sync.Mutex
 
-	// mu защищает доступ к полям stream и cancel.
-	mu     sync.Mutex
-	stream pb.ChatService_ChatServer
+	// incoming — канал входящих доменных сообщений от peer-а.
+	// Пересоздаётся при каждом новом соединении.
+	incoming chan chat.Message
+
+	// sendCh — канал исходящих доменных сообщений для отправки peer-у.
+	// Пересоздаётся при каждом новом соединении.
+	sendCh chan chat.Message
 
 	// cancel завершает контекст активного соединения.
 	cancel context.CancelFunc
+
+	// closeOnce гарантирует однократное закрытие канала incoming.
+	closeOnce sync.Once
 }
 
 // Option — функциональная опция для конфигурации Server.
@@ -52,8 +59,8 @@ func WithListener(lis net.Listener) Option {
 func New(port int, opts ...Option) *Server {
 	s := &Server{
 		port:     port,
-		incoming: make(chan *pb.ChatMessage, bufferSize),
-		sendCh:   make(chan *pb.ChatMessage, bufferSize),
+		incoming: make(chan chat.Message, bufferSize),
+		sendCh:   make(chan chat.Message, bufferSize),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -85,30 +92,67 @@ func (s *Server) Start() error {
 }
 
 // Stop корректно останавливает сервер.
+// cancel() вызывается до grpcServer.Stop(), чтобы сигнализировать горутинам
+// о завершении до принудительного закрытия стримов.
+// Канал incoming закрывается в defer внутри Chat() при завершении стрима.
 // Безопасно вызывать повторно.
 func (s *Server) Stop() {
-	if s.grpcServer != nil {
-		s.grpcServer.GracefulStop()
-	}
-
 	s.mu.Lock()
 	if s.cancel != nil {
 		s.cancel()
 	}
 	s.mu.Unlock()
+
+	if s.grpcServer != nil {
+		// Используем Stop() вместо GracefulStop() для немедленного закрытия стримов.
+		// GracefulStop() ждёт завершения Chat(), который ждёт завершения stream.Recv(),
+		// который разблокируется только после принудительного закрытия соединения.
+		s.grpcServer.Stop()
+	}
+
+	// Если Chat() никогда не вызывался (нет активного соединения),
+	// закрываем канал incoming здесь, чтобы forwardIncoming() мог завершиться.
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		close(s.incoming)
+		s.mu.Unlock()
+	})
+}
+
+// Close реализует интерфейс chat.Peer.
+// Является псевдонимом для Stop().
+func (s *Server) Close() {
+	s.Stop()
 }
 
 // Chat — обработчик bidirectional streaming RPC.
-// Запускает горутины для одновременного приёма и отправки сообщений.
+// Создаёт свежие каналы для каждого нового соединения,
+// чтобы данные от предыдущего соединения не смешивались с новыми.
 func (s *Server) Chat(stream pb.ChatService_ChatServer) error {
 	ctx, cancel := context.WithCancel(stream.Context())
 
+	incoming := make(chan chat.Message, bufferSize)
+	sendCh := make(chan chat.Message, bufferSize)
+
 	s.mu.Lock()
-	s.stream = stream
+	// Закрываем старый канал incoming перед заменой (если он ещё открыт).
+	// Используем отдельный closeOnce для каждого соединения.
+	s.incoming = incoming
+	s.sendCh = sendCh
 	s.cancel = cancel
+	s.closeOnce = sync.Once{} // сбрасываем для нового соединения
 	s.mu.Unlock()
 
-	defer cancel()
+	defer func() {
+		cancel()
+		// Закрываем канал incoming при завершении стрима,
+		// чтобы forwardIncoming() мог корректно завершиться.
+		s.closeOnce.Do(func() {
+			s.mu.Lock()
+			close(s.incoming)
+			s.mu.Unlock()
+		})
+	}()
 
 	var wg sync.WaitGroup
 
@@ -116,22 +160,22 @@ func (s *Server) Chat(stream pb.ChatService_ChatServer) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		s.receiveLoop(ctx, stream)
+		s.receiveLoop(ctx, stream, incoming)
 	}()
 
 	// Горутина отправки сообщений peer-у.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		s.sendLoop(ctx, stream)
+		s.sendLoop(ctx, stream, sendCh)
 	}()
 
 	wg.Wait()
 	return nil
 }
 
-// receiveLoop читает сообщения из stream и пишет в канал incoming.
-func (s *Server) receiveLoop(ctx context.Context, stream pb.ChatService_ChatServer) {
+// receiveLoop читает сообщения из stream, конвертирует в доменные и пишет в канал incoming.
+func (s *Server) receiveLoop(ctx context.Context, stream pb.ChatService_ChatServer, incoming chan<- chat.Message) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -143,7 +187,7 @@ func (s *Server) receiveLoop(ctx context.Context, stream pb.ChatService_ChatServ
 				return
 			}
 			select {
-			case s.incoming <- pbMsg:
+			case incoming <- chat.MessageFromProto(pbMsg):
 			case <-ctx.Done():
 				return
 			}
@@ -151,34 +195,42 @@ func (s *Server) receiveLoop(ctx context.Context, stream pb.ChatService_ChatServ
 	}
 }
 
-// sendLoop читает сообщения из sendCh и отправляет их через stream.
-func (s *Server) sendLoop(ctx context.Context, stream pb.ChatService_ChatServer) {
+// sendLoop читает доменные сообщения из sendCh, конвертирует в proto и отправляет через stream.
+func (s *Server) sendLoop(ctx context.Context, stream pb.ChatService_ChatServer, sendCh <-chan chat.Message) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case msg, ok := <-s.sendCh:
+		case msg, ok := <-sendCh:
 			if !ok {
 				return
 			}
-			if err := stream.Send(msg); err != nil {
+			if err := stream.Send(msg.ToProto()); err != nil {
 				return
 			}
 		}
 	}
 }
 
-// Send ставит protobuf-сообщение в очередь на отправку peer-у.
-func (s *Server) Send(msg *pb.ChatMessage) error {
+// Send отправляет доменное сообщение peer-у через активный stream.
+// Реализует интерфейс chat.MessageSender.
+func (s *Server) Send(msg chat.Message) error {
+	s.mu.Lock()
+	sendCh := s.sendCh
+	s.mu.Unlock()
+
 	select {
-	case s.sendCh <- msg:
+	case sendCh <- msg:
 		return nil
 	default:
 		return fmt.Errorf("send buffer full")
 	}
 }
 
-// Incoming возвращает канал входящих protobuf-сообщений от peer-а.
-func (s *Server) Incoming() <-chan *pb.ChatMessage {
+// Incoming возвращает канал входящих доменных сообщений от peer-а.
+// Реализует интерфейс chat.MessageReceiver.
+func (s *Server) Incoming() <-chan chat.Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.incoming
 }

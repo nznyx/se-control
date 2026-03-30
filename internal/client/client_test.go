@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/nznyx/se-control/internal/chat"
 	"github.com/nznyx/se-control/internal/client"
 	pb "github.com/nznyx/se-control/pkg/proto/chat"
 )
@@ -97,21 +98,21 @@ func TestClient_Send(t *testing.T) {
 	err := cli.Connect()
 	require.NoError(t, err)
 
-	msg := &pb.ChatMessage{
+	msg := chat.Message{
 		Sender:    "Bob",
 		Text:      "Hello from client!",
-		Timestamp: time.Now().Unix(),
+		Timestamp: time.Now(),
 	}
 
 	err = cli.Send(msg)
 	require.NoError(t, err, "client Send should not return error")
 
-	// Проверяем, что сервер получил сообщение.
+	// Проверяем, что сервер получил сообщение (в proto-формате).
 	select {
 	case received := <-echo.received:
-		assert.Equal(t, msg.GetSender(), received.GetSender())
-		assert.Equal(t, msg.GetText(), received.GetText())
-		assert.Equal(t, msg.GetTimestamp(), received.GetTimestamp())
+		assert.Equal(t, msg.Sender, received.GetSender())
+		assert.Equal(t, msg.Text, received.GetText())
+		assert.Equal(t, msg.Timestamp.Unix(), received.GetTimestamp())
 	case <-time.After(3 * time.Second):
 		t.Fatal("timeout waiting for server to receive message")
 	}
@@ -132,10 +133,10 @@ func TestClient_Receive(t *testing.T) {
 	err := cli.Connect()
 	require.NoError(t, err)
 
-	sent := &pb.ChatMessage{
+	sent := chat.Message{
 		Sender:    "Alice",
 		Text:      "Echo test",
-		Timestamp: time.Now().Unix(),
+		Timestamp: time.Now(),
 	}
 
 	err = cli.Send(sent)
@@ -144,9 +145,9 @@ func TestClient_Receive(t *testing.T) {
 	// Клиент должен получить отражённое сообщение через Incoming().
 	select {
 	case received := <-cli.Incoming():
-		assert.Equal(t, sent.GetSender(), received.GetSender(), "sender should match")
-		assert.Equal(t, sent.GetText(), received.GetText(), "text should match")
-		assert.Equal(t, sent.GetTimestamp(), received.GetTimestamp(), "timestamp should match")
+		assert.Equal(t, sent.Sender, received.Sender, "sender should match")
+		assert.Equal(t, sent.Text, received.Text, "text should match")
+		assert.Equal(t, sent.Timestamp.Unix(), received.Timestamp.Unix(), "timestamp should match")
 	case <-time.After(3 * time.Second):
 		t.Fatal("timeout waiting for message on client Incoming() channel")
 	}
@@ -177,16 +178,16 @@ func TestClient_Receive_Unicode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err = cli.Send(&pb.ChatMessage{
+			err = cli.Send(chat.Message{
 				Sender:    "Тест",
 				Text:      tt.text,
-				Timestamp: time.Now().Unix(),
+				Timestamp: time.Now(),
 			})
 			require.NoError(t, err)
 
 			select {
 			case received := <-cli.Incoming():
-				assert.Equal(t, tt.text, received.GetText(), "unicode text should be preserved")
+				assert.Equal(t, tt.text, received.Text, "unicode text should be preserved")
 			case <-time.After(3 * time.Second):
 				t.Fatalf("timeout waiting for unicode message: %s", tt.text)
 			}
@@ -241,11 +242,7 @@ func TestClient_ConnectFail(t *testing.T) {
 			err := cli.Connect()
 			// grpc.NewClient не возвращает ошибку сразу (lazy connection),
 			// но Chat stream должен вернуть ошибку при попытке установить соединение.
-			// Проверяем, что либо Connect, либо последующая операция возвращает ошибку.
 			if err == nil {
-				// Если Connect не вернул ошибку, Send должен вернуть ошибку
-				// или соединение должно быть нерабочим.
-				// Это нормально для gRPC с lazy connection.
 				t.Log("Connect returned nil (lazy connection), this is expected for gRPC")
 			}
 		})
@@ -259,14 +256,13 @@ func TestClient_Send_WithoutConnect(t *testing.T) {
 	cli := client.New("localhost:50051")
 	defer cli.Close()
 
-	msg := &pb.ChatMessage{
+	msg := chat.Message{
 		Sender:    "Test",
 		Text:      "No connection",
-		Timestamp: time.Now().Unix(),
+		Timestamp: time.Now(),
 	}
 
-	// Send без Connect должен вернуть ошибку или записать в буфер.
-	// Поскольку sendCh буферизован, первый Send может не вернуть ошибку.
-	// Это допустимое поведение — ошибка проявится при попытке реальной отправки.
-	_ = cli.Send(msg)
+	// Send без Connect должен вернуть ошибку (sendCh == nil).
+	err := cli.Send(msg)
+	assert.Error(t, err, "Send without Connect should return error")
 }

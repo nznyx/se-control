@@ -7,25 +7,24 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	pb "github.com/nznyx/se-control/pkg/proto/chat"
 )
 
-// mockPeer реализует интерфейс protoSender для тестов.
+// mockPeer реализует интерфейс Peer для тестов.
 // Позволяет проверять отправленные сообщения и симулировать ошибки.
 type mockPeer struct {
-	sent     []*pb.ChatMessage
+	sent     []Message
 	err      error
-	incoming chan *pb.ChatMessage
+	incoming chan Message
+	closed   bool
 }
 
 func newMockPeer() *mockPeer {
 	return &mockPeer{
-		incoming: make(chan *pb.ChatMessage, 100),
+		incoming: make(chan Message, 100),
 	}
 }
 
-func (m *mockPeer) Send(msg *pb.ChatMessage) error {
+func (m *mockPeer) Send(msg Message) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -33,14 +32,15 @@ func (m *mockPeer) Send(msg *pb.ChatMessage) error {
 	return nil
 }
 
-func (m *mockPeer) Incoming() <-chan *pb.ChatMessage {
+func (m *mockPeer) Incoming() <-chan Message {
 	return m.incoming
 }
 
-// injectPeer подставляет mock-peer в сервис через поле peer.
-// Используется только в тестах (white-box testing внутри пакета).
-func injectPeer(s *Service, peer protoSender) {
-	s.peer = peer
+func (m *mockPeer) Close() {
+	if !m.closed {
+		m.closed = true
+		close(m.incoming)
+	}
 }
 
 // TestNewMessage проверяет создание сообщения с корректными полями (T-CH-01).
@@ -64,7 +64,7 @@ func TestMessageTimestamp(t *testing.T) {
 
 	service := NewService("Alice")
 	mock := newMockPeer()
-	injectPeer(service, mock)
+	service.SetPeer(mock)
 
 	before := time.Now()
 	err := service.Send("Hello")
@@ -73,7 +73,7 @@ func TestMessageTimestamp(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, mock.sent, 1, "should have sent one message")
 
-	ts := time.Unix(mock.sent[0].GetTimestamp(), 0)
+	ts := mock.sent[0].Timestamp
 	assert.True(t, !ts.Before(before.Truncate(time.Second)) && !ts.After(after.Add(time.Second)),
 		"timestamp should be set at send time, got: %v", ts)
 }
@@ -123,7 +123,7 @@ func TestService_Send_WithMock(t *testing.T) {
 			service := NewService("Alice")
 			mock := newMockPeer()
 			mock.err = tt.mockErr
-			injectPeer(service, mock)
+			service.SetPeer(mock)
 
 			err := service.Send(tt.text)
 
@@ -135,9 +135,9 @@ func TestService_Send_WithMock(t *testing.T) {
 
 			if tt.wantSent {
 				require.Len(t, mock.sent, 1, "should have sent exactly one message")
-				assert.Equal(t, "Alice", mock.sent[0].GetSender(), "sender should be username")
-				assert.Equal(t, tt.text, mock.sent[0].GetText(), "text should match")
-				assert.NotZero(t, mock.sent[0].GetTimestamp(), "timestamp should be set")
+				assert.Equal(t, "Alice", mock.sent[0].Sender, "sender should be username")
+				assert.Equal(t, tt.text, mock.sent[0].Text, "text should match")
+				assert.False(t, mock.sent[0].Timestamp.IsZero(), "timestamp should be set")
 			} else {
 				assert.Empty(t, mock.sent, "should not have sent any message")
 			}
@@ -182,6 +182,19 @@ func TestService_Stop(t *testing.T) {
 	assert.NotPanics(t, func() { service.Stop() }, "Stop without Start should not panic")
 }
 
+// TestService_Stop_ClosesPeer проверяет, что Stop() вызывает Close() на peer.
+func TestService_Stop_ClosesPeer(t *testing.T) {
+	t.Parallel()
+
+	service := NewService("Alice")
+	mock := newMockPeer()
+	service.SetPeer(mock)
+
+	service.Stop()
+
+	assert.True(t, mock.closed, "Stop should call Close() on peer")
+}
+
 // TestService_Send_NotConnected проверяет ошибку при отправке без подключения.
 func TestService_Send_NotConnected(t *testing.T) {
 	t.Parallel()
@@ -191,6 +204,31 @@ func TestService_Send_NotConnected(t *testing.T) {
 	err := service.Send("Hello")
 	assert.Error(t, err, "Send without connection should return error")
 	assert.EqualError(t, err, "not connected to peer")
+}
+
+// TestService_ForwardIncoming проверяет, что SetPeer запускает пересылку входящих сообщений.
+func TestService_ForwardIncoming(t *testing.T) {
+	t.Parallel()
+
+	service := NewService("Bob")
+	mock := newMockPeer()
+	service.SetPeer(mock)
+
+	// Отправляем сообщение через mock peer.
+	expected := Message{
+		Sender:    "Alice",
+		Text:      "Forwarded message",
+		Timestamp: time.Now(),
+	}
+	mock.incoming <- expected
+
+	select {
+	case received := <-service.Incoming():
+		assert.Equal(t, expected.Sender, received.Sender)
+		assert.Equal(t, expected.Text, received.Text)
+	case <-time.After(time.Second):
+		t.Fatal("timeout: forwardIncoming did not forward message")
+	}
 }
 
 // TestMessageToProto проверяет конвертацию доменного сообщения в protobuf.
@@ -215,15 +253,18 @@ func TestMessageToProto(t *testing.T) {
 func TestMessageFromProto(t *testing.T) {
 	t.Parallel()
 
-	pbMsg := &pb.ChatMessage{
+	ts := time.Unix(1711800000, 0)
+	msg := Message{
 		Sender:    "Bob",
 		Text:      "Привет! 🎉",
-		Timestamp: 1711800000,
+		Timestamp: ts,
 	}
 
-	msg := MessageFromProto(pbMsg)
+	// Конвертируем туда и обратно.
+	proto := msg.ToProto()
+	restored := MessageFromProto(proto)
 
-	assert.Equal(t, "Bob", msg.Sender)
-	assert.Equal(t, "Привет! 🎉", msg.Text)
-	assert.Equal(t, int64(1711800000), msg.Timestamp.Unix())
+	assert.Equal(t, "Bob", restored.Sender)
+	assert.Equal(t, "Привет! 🎉", restored.Text)
+	assert.Equal(t, ts.Unix(), restored.Timestamp.Unix())
 }

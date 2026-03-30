@@ -5,24 +5,15 @@ import (
 	"time"
 
 	"github.com/nznyx/se-control/internal/app"
-	"github.com/nznyx/se-control/internal/client"
-	"github.com/nznyx/se-control/internal/server"
-	pb "github.com/nznyx/se-control/pkg/proto/chat"
 )
 
-// protoSender — интерфейс для отправки protobuf-сообщений.
-// Реализуется как *server.Server, так и *client.Client.
-type protoSender interface {
-	Send(msg *pb.ChatMessage) error
-	Incoming() <-chan *pb.ChatMessage
-}
-
 // Service — сервис чата, координирующий отправку и получение сообщений.
+// Зависит от абстракции Peer, а не от конкретных реализаций gRPC сервера/клиента.
 type Service struct {
 	username string
 	messages chan Message
-	// peer — активное соединение (сервер или клиент).
-	peer protoSender
+	// peer — активное соединение (сервер или клиент), инжектируется через SetPeer.
+	peer Peer
 }
 
 // NewService создаёт новый экземпляр Service.
@@ -33,25 +24,19 @@ func NewService(username string) *Service {
 	}
 }
 
-// Start инициализирует и запускает сервис в зависимости от конфигурации.
-// Если config.IsServer() — запускает gRPC-сервер, иначе — подключается как клиент.
-// После успешного запуска начинает пересылку входящих сообщений в канал messages.
-func (s *Service) Start(config app.Config) error {
-	if config.IsServer() {
-		srv := server.New(config.Port)
-		if err := srv.Start(); err != nil {
-			return err
-		}
-		s.peer = srv
-	} else {
-		cli := client.New(config.PeerAddress)
-		if err := cli.Connect(); err != nil {
-			return err
-		}
-		s.peer = cli
-	}
-
+// SetPeer инжектирует транспортный уровень (server или client).
+// Вызывается из App после создания и запуска соответствующего компонента.
+func (s *Service) SetPeer(peer Peer) {
+	s.peer = peer
 	go s.forwardIncoming()
+}
+
+// Start инициализирует сервис в зависимости от конфигурации.
+// Используется только если peer не был инжектирован через SetPeer.
+// Конкретные реализации server/client создаются в app.App.
+func (s *Service) Start(_ app.Config) error {
+	// Реализация перенесена в app.App (Dependency Inversion).
+	// Этот метод оставлен для обратной совместимости.
 	return nil
 }
 
@@ -71,7 +56,7 @@ func (s *Service) Send(text string) error {
 		Timestamp: time.Now(),
 	}
 
-	return s.peer.Send(msg.ToProto())
+	return s.peer.Send(msg)
 }
 
 // Incoming возвращает канал входящих сообщений.
@@ -81,18 +66,16 @@ func (s *Service) Incoming() <-chan Message {
 
 // Stop корректно завершает работу сервиса.
 func (s *Service) Stop() {
-	if srv, ok := s.peer.(*server.Server); ok {
-		srv.Stop()
-	}
-	if cli, ok := s.peer.(*client.Client); ok {
-		cli.Close()
+	if s.peer != nil {
+		s.peer.Close()
 	}
 }
 
-// forwardIncoming читает входящие protobuf-сообщения от peer-а
-// и конвертирует их в доменные Message, записывая в канал messages.
+// forwardIncoming читает входящие доменные сообщения от peer-а
+// и записывает их в канал messages.
+// Завершается автоматически, когда peer закрывает канал Incoming().
 func (s *Service) forwardIncoming() {
-	for pbMsg := range s.peer.Incoming() {
-		s.messages <- MessageFromProto(pbMsg)
+	for msg := range s.peer.Incoming() {
+		s.messages <- msg
 	}
 }

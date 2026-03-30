@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/nznyx/se-control/internal/chat"
 	pb "github.com/nznyx/se-control/pkg/proto/chat"
 )
 
@@ -17,7 +18,8 @@ import (
 const bufferSize = 100
 
 // Client — gRPC клиент для установки соединения и обмена сообщениями.
-// Работает с protobuf-типами; конвертация в доменные типы выполняется в chat.Service.
+// Реализует интерфейс chat.Peer: Send(chat.Message), Incoming() <-chan chat.Message, Close().
+// Конвертация proto ↔ domain выполняется внутри пакета.
 type Client struct {
 	address string
 	opts    []grpc.DialOption
@@ -25,15 +27,21 @@ type Client struct {
 	conn   *grpc.ClientConn
 	stream pb.ChatService_ChatClient
 
-	// incoming — канал входящих protobuf-сообщений от peer-а.
-	incoming chan *pb.ChatMessage
-	// sendCh — канал исходящих protobuf-сообщений для отправки peer-у.
-	sendCh chan *pb.ChatMessage
+	// incoming — канал входящих доменных сообщений от peer-а.
+	// Пересоздаётся при каждом новом Connect().
+	incoming chan chat.Message
+
+	// sendCh — канал исходящих доменных сообщений для отправки peer-у.
+	// Пересоздаётся при каждом новом Connect().
+	sendCh chan chat.Message
 
 	// cancel завершает контекст активного соединения.
 	cancel context.CancelFunc
-	// mu защищает доступ к полям conn и stream.
+	// mu защищает доступ к полям conn, stream, incoming, sendCh.
 	mu sync.Mutex
+
+	// closeOnce гарантирует однократное закрытие канала incoming.
+	closeOnce sync.Once
 }
 
 // Option — функциональная опция для конфигурации Client.
@@ -49,10 +57,8 @@ func WithDialOptions(opts ...grpc.DialOption) Option {
 // New создаёт новый экземпляр Client.
 func New(address string, opts ...Option) *Client {
 	c := &Client{
-		address:  address,
-		incoming: make(chan *pb.ChatMessage, bufferSize),
-		sendCh:   make(chan *pb.ChatMessage, bufferSize),
-		opts:     []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
+		address: address,
+		opts:    []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -61,6 +67,7 @@ func New(address string, opts ...Option) *Client {
 }
 
 // Connect устанавливает соединение с peer-ом и запускает bidirectional stream.
+// Создаёт свежие каналы для каждого нового соединения.
 // Возвращает ошибку, если соединение или создание stream не удалось.
 func (c *Client) Connect() error {
 	conn, err := grpc.NewClient(c.address, c.opts...)
@@ -78,21 +85,35 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("creating chat stream: %w", err)
 	}
 
+	incoming := make(chan chat.Message, bufferSize)
+	sendCh := make(chan chat.Message, bufferSize)
+
 	c.mu.Lock()
 	c.conn = conn
 	c.stream = stream
 	c.cancel = cancel
+	c.incoming = incoming
+	c.sendCh = sendCh
+	c.closeOnce = sync.Once{} // сбрасываем для нового соединения
 	c.mu.Unlock()
 
 	// Запускаем горутины приёма и отправки сообщений.
-	go c.receiveLoop(ctx, stream)
-	go c.sendLoop(ctx, stream)
+	go c.receiveLoop(ctx, stream, incoming)
+	go c.sendLoop(ctx, stream, sendCh)
 
 	return nil
 }
 
-// receiveLoop читает сообщения из stream и пишет в канал incoming.
-func (c *Client) receiveLoop(ctx context.Context, stream pb.ChatService_ChatClient) {
+// receiveLoop читает сообщения из stream, конвертирует в доменные и пишет в канал incoming.
+func (c *Client) receiveLoop(ctx context.Context, stream pb.ChatService_ChatClient, incoming chan<- chat.Message) {
+	defer func() {
+		// Закрываем канал incoming при завершении горутины,
+		// чтобы forwardIncoming() в ChatService корректно завершился.
+		c.closeOnce.Do(func() {
+			close(incoming)
+		})
+	}()
+
 	for {
 		pbMsg, err := stream.Recv()
 		if err != nil {
@@ -100,63 +121,79 @@ func (c *Client) receiveLoop(ctx context.Context, stream pb.ChatService_ChatClie
 			return
 		}
 		select {
-		case c.incoming <- pbMsg:
+		case incoming <- chat.MessageFromProto(pbMsg):
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-// sendLoop читает сообщения из sendCh и отправляет их через stream.
-func (c *Client) sendLoop(ctx context.Context, stream pb.ChatService_ChatClient) {
+// sendLoop читает доменные сообщения из sendCh, конвертирует в proto и отправляет через stream.
+func (c *Client) sendLoop(ctx context.Context, stream pb.ChatService_ChatClient, sendCh <-chan chat.Message) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case msg, ok := <-c.sendCh:
+		case msg, ok := <-sendCh:
 			if !ok {
 				return
 			}
-			if err := stream.Send(msg); err != nil {
+			if err := stream.Send(msg.ToProto()); err != nil {
 				return
 			}
 		}
 	}
 }
 
-// Send ставит protobuf-сообщение в очередь на отправку peer-у.
-func (c *Client) Send(msg *pb.ChatMessage) error {
+// Send отправляет доменное сообщение peer-у через активный stream.
+// Реализует интерфейс chat.MessageSender.
+func (c *Client) Send(msg chat.Message) error {
+	c.mu.Lock()
+	sendCh := c.sendCh
+	c.mu.Unlock()
+
+	if sendCh == nil {
+		return fmt.Errorf("not connected")
+	}
+
 	select {
-	case c.sendCh <- msg:
+	case sendCh <- msg:
 		return nil
 	default:
 		return fmt.Errorf("send buffer full")
 	}
 }
 
-// Incoming возвращает канал входящих protobuf-сообщений от peer-а.
-func (c *Client) Incoming() <-chan *pb.ChatMessage {
+// Incoming возвращает канал входящих доменных сообщений от peer-а.
+// Реализует интерфейс chat.MessageReceiver.
+func (c *Client) Incoming() <-chan chat.Message {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.incoming
 }
 
 // Close корректно закрывает соединение и stream.
+// Реализует интерфейс chat.Peer.
 // Безопасно вызывать повторно.
 func (c *Client) Close() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	cancel := c.cancel
+	stream := c.stream
+	conn := c.conn
+	c.cancel = nil
+	c.stream = nil
+	c.conn = nil
+	c.mu.Unlock()
 
-	if c.cancel != nil {
-		c.cancel()
-		c.cancel = nil
+	if cancel != nil {
+		cancel()
 	}
 
-	if c.stream != nil {
-		_ = c.stream.CloseSend()
-		c.stream = nil
+	if stream != nil {
+		_ = stream.CloseSend()
 	}
 
-	if c.conn != nil {
-		_ = c.conn.Close()
-		c.conn = nil
+	if conn != nil {
+		_ = conn.Close()
 	}
 }

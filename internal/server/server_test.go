@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/nznyx/se-control/internal/chat"
 	"github.com/nznyx/se-control/internal/server"
 	pb "github.com/nznyx/se-control/pkg/proto/chat"
 )
@@ -89,6 +90,65 @@ func TestServer_Stop(t *testing.T) {
 	assert.NotPanics(t, func() { srv.Stop() }, "repeated Stop should not panic")
 }
 
+// TestServer_Stop_DeadlockWhenClientConnected проверяет отсутствие deadlock при Stop()
+// когда клиент подключён.
+func TestServer_Stop_DeadlockWhenClientConnected(t *testing.T) {
+	t.Parallel()
+
+	srv, lis := newBufconnServer(t)
+	err := srv.Start()
+	require.NoError(t, err)
+
+	// Подключаем клиента, но НЕ отключаем его.
+	grpcClient := newBufconnClient(t, lis)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err = grpcClient.Chat(ctx)
+	require.NoError(t, err)
+
+	// Даём время на установку bidirectional stream.
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop() должен завершиться без deadlock.
+	done := make(chan struct{})
+	go func() {
+		srv.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Успех: Stop() завершился без deadlock.
+	case <-time.After(2 * time.Second):
+		t.Fatal("DEADLOCK: srv.Stop() завис. GracefulStop() ждёт завершения клиента, а cancel() вызывается после.")
+	}
+}
+
+// TestServer_Stop_ClosesIncomingChannel проверяет, что Stop() закрывает канал Incoming(),
+// чтобы forwardIncoming() в ChatService мог корректно завершиться.
+func TestServer_Stop_ClosesIncomingChannel(t *testing.T) {
+	t.Parallel()
+
+	srv, _ := newBufconnServer(t)
+	err := srv.Start()
+	require.NoError(t, err)
+
+	incoming := srv.Incoming()
+
+	srv.Stop()
+
+	// Канал должен быть закрыт после Stop().
+	select {
+	case _, ok := <-incoming:
+		if ok {
+			t.Fatal("ожидалось, что канал будет закрыт, но получено значение")
+		}
+		// Успех: канал закрыт.
+	case <-time.After(time.Second):
+		t.Fatal("GOROUTINE LEAK: канал Incoming() не был закрыт после Stop()")
+	}
+}
+
 // TestServer_ChatStream проверяет bidirectional streaming через bufconn (T-SRV-03).
 // Клиент отправляет сообщение — сервер получает его через Incoming().
 func TestServer_ChatStream(t *testing.T) {
@@ -117,12 +177,12 @@ func TestServer_ChatStream(t *testing.T) {
 	err = stream.Send(sent)
 	require.NoError(t, err, "client should send message without error")
 
-	// Сервер должен получить сообщение через Incoming().
+	// Сервер должен получить сообщение через Incoming() как доменный тип.
 	select {
 	case received := <-srv.Incoming():
-		assert.Equal(t, sent.GetSender(), received.GetSender(), "sender should match")
-		assert.Equal(t, sent.GetText(), received.GetText(), "text should match")
-		assert.Equal(t, sent.GetTimestamp(), received.GetTimestamp(), "timestamp should match")
+		assert.Equal(t, sent.GetSender(), received.Sender, "sender should match")
+		assert.Equal(t, sent.GetText(), received.Text, "text should match")
+		assert.Equal(t, sent.GetTimestamp(), received.Timestamp.Unix(), "timestamp should match")
 	case <-time.After(3 * time.Second):
 		t.Fatal("timeout waiting for message on server Incoming() channel")
 	}
@@ -163,7 +223,7 @@ func TestServer_ChatStream_Unicode(t *testing.T) {
 
 		select {
 		case received := <-srv.Incoming():
-			assert.Equal(t, text, received.GetText(), "unicode text should be preserved: %s", text)
+			assert.Equal(t, text, received.Text, "unicode text should be preserved: %s", text)
 		case <-time.After(3 * time.Second):
 			t.Fatalf("timeout waiting for unicode message: %s", text)
 		}
@@ -191,11 +251,11 @@ func TestServer_Send(t *testing.T) {
 	// Даём серверу время установить stream.
 	time.Sleep(50 * time.Millisecond)
 
-	// Сервер отправляет сообщение.
-	toSend := &pb.ChatMessage{
+	// Сервер отправляет доменное сообщение.
+	toSend := chat.Message{
 		Sender:    "Server",
 		Text:      "Hello from server!",
-		Timestamp: time.Now().Unix(),
+		Timestamp: time.Now(),
 	}
 	err = srv.Send(toSend)
 	require.NoError(t, err, "server Send should not return error")
@@ -203,8 +263,8 @@ func TestServer_Send(t *testing.T) {
 	// Клиент должен получить сообщение.
 	received, err := stream.Recv()
 	require.NoError(t, err, "client should receive message")
-	assert.Equal(t, toSend.GetSender(), received.GetSender())
-	assert.Equal(t, toSend.GetText(), received.GetText())
+	assert.Equal(t, toSend.Sender, received.GetSender())
+	assert.Equal(t, toSend.Text, received.GetText())
 }
 
 // TestServer_ClientDisconnect проверяет корректную обработку отключения клиента (T-SRV-04).
@@ -229,9 +289,7 @@ func TestServer_ClientDisconnect(t *testing.T) {
 	_ = stream.CloseSend()
 
 	// Сервер должен корректно обработать отключение без паники.
-	// Даём время на обработку.
 	time.Sleep(100 * time.Millisecond)
 
-	// Сервер должен оставаться работоспособным после отключения клиента.
 	assert.NotPanics(t, func() { srv.Stop() }, "server should handle client disconnect gracefully")
 }
