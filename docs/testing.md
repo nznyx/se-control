@@ -25,55 +25,55 @@
 
 | ID | Тест | Тип | Статус |
 |----|------|-----|--------|
-| T-CH-01 | `TestNewMessage` — создание сообщения с корректными полями (sender, text, timestamp) | Unit | 🔲 Реализовать |
-| T-CH-02 | `TestMessageTimestamp` — timestamp устанавливается автоматически при создании | Unit | 🔲 Реализовать |
-| T-CH-03 | `TestChatServiceSend` — отправка сообщения через mock sender | Unit | 🔲 Реализовать |
-| T-CH-04 | `TestChatServiceReceive` — получение сообщения из канала | Unit | 🔲 Реализовать |
-| T-CH-05 | `TestChatServiceStop` — корректное завершение сервиса | Unit | 🔲 Реализовать |
-| T-CH-06 | `TestEmptyMessage` — обработка пустого текста сообщения | Unit | 🔲 Реализовать |
-| T-CH-07 | `TestUnicodeMessage` — корректная обработка Unicode символов (кириллица, эмодзи) | Unit | 🔲 Реализовать |
+| T-CH-01 | `TestNewMessage` — создание сообщения с корректными полями (sender, text, timestamp) | Unit | ✅ Реализован |
+| T-CH-02 | `TestMessageTimestamp` — timestamp устанавливается автоматически при создании | Unit | ✅ Реализован |
+| T-CH-03 | `TestService_Send_WithMock` — отправка сообщения через mock sender | Unit | ✅ Реализован |
+| T-CH-04 | `TestService_Receive` — получение сообщения из канала | Unit | ✅ Реализован |
+| T-CH-05 | `TestService_Stop` — корректное завершение сервиса | Unit | ✅ Реализован |
+| T-CH-06 | `TestService_Send_WithMock/empty_message` — обработка пустого текста сообщения | Unit | ✅ Реализован |
+| T-CH-07 | `TestService_Send_WithMock/unicode` — корректная обработка Unicode символов (кириллица, эмодзи) | Unit | ✅ Реализован |
 
 ### 2.2 Пакет `internal/server/` — gRPC сервер
 
 | ID | Тест | Тип | Статус |
 |----|------|-----|--------|
-| T-SRV-01 | `TestServerStart` — сервер запускается на указанном порту | Unit | 🔲 Реализовать |
-| T-SRV-02 | `TestServerStop` — graceful shutdown сервера | Unit | 🔲 Реализовать |
-| T-SRV-03 | `TestServerChatStream` — обработка bidirectional stream через bufconn | Integration | 🔲 Реализовать |
-| T-SRV-04 | `TestServerClientDisconnect` — обработка отключения клиента | Integration | 🔲 Реализовать |
+| T-SRV-01 | `TestServer_Start` — сервер запускается на указанном порту | Unit | ✅ Реализован |
+| T-SRV-02 | `TestServer_Stop` — graceful shutdown сервера | Unit | ✅ Реализован |
+| T-SRV-03 | `TestServer_ChatStream` — обработка bidirectional stream через bufconn | Integration | ✅ Реализован |
+| T-SRV-04 | `TestServer_ClientDisconnect` — обработка отключения клиента | Integration | ✅ Реализован |
 
 ### 2.3 Пакет `internal/client/` — gRPC клиент
 
 | ID | Тест | Тип | Статус |
 |----|------|-----|--------|
-| T-CLI-01 | `TestClientConnect` — подключение к серверу через bufconn | Integration | 🔲 Реализовать |
-| T-CLI-02 | `TestClientSend` — отправка сообщения через stream | Integration | 🔲 Реализовать |
-| T-CLI-03 | `TestClientReceive` — получение сообщения из stream | Integration | 🔲 Реализовать |
-| T-CLI-04 | `TestClientClose` — корректное закрытие соединения | Integration | 🔲 Реализовать |
-| T-CLI-05 | `TestClientConnectFail` — ошибка при подключении к несуществующему адресу | Unit | 🔲 Реализовать |
+| T-CLI-01 | `TestClient_Connect` — подключение к серверу через bufconn | Integration | ✅ Реализован |
+| T-CLI-02 | `TestClient_Send` — отправка сообщения через stream | Integration | ✅ Реализован |
+| T-CLI-03 | `TestClient_Receive` — получение сообщения из stream | Integration | ✅ Реализован |
+| T-CLI-04 | `TestClient_Close` — корректное закрытие соединения | Integration | ✅ Реализован |
+| T-CLI-05 | `TestClient_ConnectFail` — ошибка при подключении к несуществующему адресу | Unit | ✅ Реализован |
 
 ### 2.4 Пакет `internal/ui/` — консольный интерфейс
 
 | ID | Тест | Тип | Статус |
 |----|------|-----|--------|
-| T-UI-01 | `TestDisplayMessage` — форматирование сообщения: имя, дата, текст | Unit | 🔲 Реализовать |
-| T-UI-02 | `TestDisplaySystem` — вывод системного сообщения | Unit | 🔲 Реализовать |
-| T-UI-03 | `TestReadInput` — чтение строки из reader | Unit | 🔲 Реализовать |
-| T-UI-04 | `TestMessageFormat` — проверка формата `[2026-03-30 12:00:00] Alice: Hello` | Unit | 🔲 Реализовать |
+| T-UI-01 | `TestConsole_DisplayMessage` — форматирование сообщения: имя, дата, текст | Unit | ✅ Реализован |
+| T-UI-02 | `TestConsole_DisplaySystem` — вывод системного сообщения | Unit | ✅ Реализован |
+| T-UI-03 | `TestConsole_ReadInput` — чтение строки из reader | Unit | ✅ Реализован |
+| T-UI-04 | `TestConsole_DisplayMessage` — проверка формата `[2026-03-30 12:00:00] Alice: Hello` | Unit | ✅ Реализован |
 
 ### 2.5 Пакет `internal/app/` — координатор
 
 | ID | Тест | Тип | Статус |
 |----|------|-----|--------|
-| T-APP-01 | `TestConfigIsServer` — `IsServer()` возвращает true при пустом адресе | Unit | 🔲 Реализовать |
-| T-APP-02 | `TestConfigIsClient` — `IsServer()` возвращает false при указанном адресе | Unit | 🔲 Реализовать |
+| T-APP-01 | `TestConfig_IsServer/empty_address` — `IsServer()` возвращает true при пустом адресе | Unit | ✅ Реализован |
+| T-APP-02 | `TestConfig_IsServer/with_address` — `IsServer()` возвращает false при указанном адресе | Unit | ✅ Реализован |
 
 ### 2.6 Интеграционные / E2E тесты
 
 | ID | Тест | Тип | Статус |
 |----|------|-----|--------|
-| T-E2E-01 | `TestFullChatSession` — сервер и клиент обмениваются сообщениями через bufconn | Integration | 🔲 Реализовать |
-| T-E2E-02 | `TestGracefulShutdown` — оба пира корректно завершают работу | Integration | 🔲 В плане |
+| T-E2E-01 | `TestFullChatSession` — сервер и клиент обмениваются сообщениями через bufconn | Integration | ✅ Реализован |
+| T-E2E-02 | `TestGracefulShutdown` — оба пира корректно завершают работу | Integration | ✅ Реализован |
 | T-E2E-03 | `TestReconnectScenario` — поведение при разрыве соединения | Integration | 🔲 В плане |
 
 ---
@@ -82,25 +82,26 @@
 
 ### Обязательные (основной костяк)
 
-Эти тесты должны быть реализованы в первую очередь:
+Все обязательные тесты реализованы ✅:
 
-1. **T-CH-01, T-CH-03, T-CH-04** — базовая бизнес-логика сообщений
-2. **T-CH-07** — Unicode поддержка (ключевое требование)
-3. **T-SRV-01, T-SRV-03** — запуск сервера и streaming
-4. **T-CLI-01, T-CLI-02, T-CLI-03** — подключение клиента и обмен
-5. **T-UI-01, T-UI-04** — форматирование вывода
-6. **T-APP-01, T-APP-02** — определение режима работы
-7. **T-E2E-01** — полный сценарий обмена сообщениями
+1. **T-CH-01, T-CH-03, T-CH-04** — базовая бизнес-логика сообщений ✅
+2. **T-CH-07** — Unicode поддержка (ключевое требование) ✅
+3. **T-SRV-01, T-SRV-03** — запуск сервера и streaming ✅
+4. **T-CLI-01, T-CLI-02, T-CLI-03** — подключение клиента и обмен ✅
+5. **T-UI-01, T-UI-04** — форматирование вывода ✅
+6. **T-APP-01, T-APP-02** — определение режима работы ✅
+7. **T-E2E-01** — полный сценарий обмена сообщениями ✅
 
-### Желательные (в плане)
+### Желательные
 
-Эти тесты реализуются при наличии времени:
+Реализованы дополнительно:
 
-- **T-CH-02, T-CH-05, T-CH-06** — edge cases бизнес-логики
-- **T-SRV-02, T-SRV-04** — graceful shutdown и disconnect
-- **T-CLI-04, T-CLI-05** — закрытие и ошибки подключения
-- **T-UI-02, T-UI-03** — системные сообщения и чтение ввода
-- **T-E2E-02, T-E2E-03** — shutdown и reconnect сценарии
+- **T-CH-02, T-CH-05, T-CH-06** — edge cases бизнес-логики ✅
+- **T-SRV-02, T-SRV-04** — graceful shutdown и disconnect ✅
+- **T-CLI-04, T-CLI-05** — закрытие и ошибки подключения ✅
+- **T-UI-02, T-UI-03** — системные сообщения и чтение ввода ✅
+- **T-E2E-02** — graceful shutdown обоих пиров ✅
+- **T-E2E-03** — reconnect сценарий 🔲 В плане
 
 ---
 
@@ -124,21 +125,26 @@ go test ./internal/server/... ./internal/client/... -tags=integration
 
 ### 4.2 Mock-объекты
 
-Моки реализуются вручную через интерфейсы (без codegen-фреймворков):
+Моки реализуются вручную через интерфейс `protoSender` (без codegen-фреймворков):
 
 ```go
-// mockSender реализует интерфейс MessageSender для тестов.
-type mockSender struct {
-    sent []Message
-    err  error
+// mockPeer реализует интерфейс protoSender для тестов.
+type mockPeer struct {
+    sent     []*pb.ChatMessage
+    err      error
+    incoming chan *pb.ChatMessage
 }
 
-func (m *mockSender) Send(msg Message) error {
+func (m *mockPeer) Send(msg *pb.ChatMessage) error {
     if m.err != nil {
         return m.err
     }
     m.sent = append(m.sent, msg)
     return nil
+}
+
+func (m *mockPeer) Incoming() <-chan *pb.ChatMessage {
+    return m.incoming
 }
 ```
 
@@ -149,11 +155,8 @@ func (m *mockSender) Send(msg Message) error {
 // Это позволяет тестировать gRPC без реальной сети.
 const bufSize = 1024 * 1024
 
-var lis *bufconn.Listener
-
-func init() {
-    lis = bufconn.Listen(bufSize)
-}
+lis := bufconn.Listen(bufSize)
+srv := server.New(0, server.WithListener(lis))
 ```
 
 ### 4.4 CI интеграция
