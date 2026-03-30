@@ -7,14 +7,22 @@ import (
 	"github.com/nznyx/se-control/internal/app"
 	"github.com/nznyx/se-control/internal/client"
 	"github.com/nznyx/se-control/internal/server"
+	pb "github.com/nznyx/se-control/pkg/proto/chat"
 )
+
+// protoSender — интерфейс для отправки protobuf-сообщений.
+// Реализуется как *server.Server, так и *client.Client.
+type protoSender interface {
+	Send(msg *pb.ChatMessage) error
+	Incoming() <-chan *pb.ChatMessage
+}
 
 // Service — сервис чата, координирующий отправку и получение сообщений.
 type Service struct {
 	username string
 	messages chan Message
-	server   *server.Server
-	client   *client.Client
+	// peer — активное соединение (сервер или клиент).
+	peer protoSender
 }
 
 // NewService создаёт новый экземпляр Service.
@@ -27,14 +35,24 @@ func NewService(username string) *Service {
 
 // Start инициализирует и запускает сервис в зависимости от конфигурации.
 // Если config.IsServer() — запускает gRPC-сервер, иначе — подключается как клиент.
+// После успешного запуска начинает пересылку входящих сообщений в канал messages.
 func (s *Service) Start(config app.Config) error {
 	if config.IsServer() {
-		s.server = server.New(config.Port)
-		return s.server.Start()
+		srv := server.New(config.Port)
+		if err := srv.Start(); err != nil {
+			return err
+		}
+		s.peer = srv
+	} else {
+		cli := client.New(config.PeerAddress)
+		if err := cli.Connect(); err != nil {
+			return err
+		}
+		s.peer = cli
 	}
 
-	s.client = client.New(config.PeerAddress)
-	return s.client.Connect()
+	go s.forwardIncoming()
+	return nil
 }
 
 // Send отправляет текстовое сообщение от имени текущего пользователя.
@@ -43,14 +61,17 @@ func (s *Service) Send(text string) error {
 		return errors.New("cannot send empty message")
 	}
 
-	_ = Message{
+	if s.peer == nil {
+		return errors.New("not connected to peer")
+	}
+
+	msg := Message{
 		Sender:    s.username,
 		Text:      text,
 		Timestamp: time.Now(),
 	}
 
-	// TODO: реализовать интеграцию с s.server и s.client после их готовности
-	return nil
+	return s.peer.Send(msg.ToProto())
 }
 
 // Incoming возвращает канал входящих сообщений.
@@ -60,11 +81,18 @@ func (s *Service) Incoming() <-chan Message {
 
 // Stop корректно завершает работу сервиса.
 func (s *Service) Stop() {
-	if s.server != nil {
-		s.server.Stop()
+	if srv, ok := s.peer.(*server.Server); ok {
+		srv.Stop()
 	}
+	if cli, ok := s.peer.(*client.Client); ok {
+		cli.Close()
+	}
+}
 
-	if s.client != nil {
-		s.client.Close()
+// forwardIncoming читает входящие protobuf-сообщения от peer-а
+// и конвертирует их в доменные Message, записывая в канал messages.
+func (s *Service) forwardIncoming() {
+	for pbMsg := range s.peer.Incoming() {
+		s.messages <- MessageFromProto(pbMsg)
 	}
 }
